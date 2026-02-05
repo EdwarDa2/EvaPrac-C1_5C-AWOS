@@ -51,19 +51,22 @@ GROUP BY b.id, b.title, b.author;
 -- VERIFY: SELECT * FROM vw_most_borrowed_books ORDER BY ranking LIMIT 5;
 
 -- ============================================================
--- Grain: Una fila por Mes/Año.
+-- Grain: Una fila por Mes/Año (Basado en la fecha del préstamo).
 -- Metrics: Total generado, recaudado y deuda pendiente.
+-- CORRECCIÓN: Se hace JOIN con loans para obtener la fecha, 
+-- ya que 'fines' podría no tener created_at.
 -- ============================================================
 CREATE OR REPLACE VIEW vw_fines_summary AS
 SELECT 
-    TO_CHAR(created_at, 'YYYY-MM') AS month_label,
-    COUNT(*) AS total_fines,
-    SUM(amount) AS total_amount_generated,
-    SUM(CASE WHEN paid_at IS NOT NULL THEN amount ELSE 0 END) AS total_collected,
-    SUM(CASE WHEN paid_at IS NULL THEN amount ELSE 0 END) AS pending_debt
-FROM fines
-GROUP BY TO_CHAR(created_at, 'YYYY-MM')
-HAVING SUM(amount) > 0;
+    TO_CHAR(l.loaned_at, 'YYYY-MM') AS month_label,
+    COUNT(f.id) AS total_fines,
+    SUM(f.amount) AS total_amount_generated,
+    SUM(CASE WHEN f.paid_at IS NOT NULL THEN f.amount ELSE 0 END) AS total_collected,
+    SUM(CASE WHEN f.paid_at IS NULL THEN f.amount ELSE 0 END) AS pending_debt
+FROM fines f
+JOIN loans l ON f.loan_id = l.id
+GROUP BY TO_CHAR(l.loaned_at, 'YYYY-MM')
+HAVING SUM(f.amount) > 0;
 
 -- VERIFY: SELECT * FROM vw_fines_summary ORDER BY month_label DESC;
 
