@@ -1,96 +1,113 @@
--- Vista que muestra los préstamos vencidos y no devueltos
--- Permite identificar usuarios morosos
+-- ============================================================
+-- Grain: Una fila por cada préstamo vencido.
+-- Metrics: Días de atraso, Nivel de severidad, Monto estimado de multa.
+-- ============================================================
 CREATE OR REPLACE VIEW vw_overdue_loans AS
-WITH overdue AS (
-    SELECT
+WITH overdue_calc AS (
+    SELECT 
         l.id AS loan_id,
         l.member_id,
         l.copy_id,
         l.due_at,
-        NOW()::date - l.due_at::date AS days_overdue
+        CURRENT_DATE - l.due_at::date AS days_overdue
     FROM loans l
-    WHERE l.returned_at IS NULL
-      AND l.due_at < NOW()
+    WHERE l.returned_at IS NULL 
+      AND l.due_at < CURRENT_DATE
 )
-SELECT
-    o.loan_id,
+SELECT 
+    oc.loan_id,
     m.name AS member_name,
     b.title AS book_title,
-    c.barcode,
-    o.due_at,
-    o.days_overdue,
-    CASE
-        WHEN o.days_overdue > 30 THEN 'CRÍTICO'
-        WHEN o.days_overdue BETWEEN 15 AND 30 THEN 'ALTO'
-        ELSE 'MODERADO'
-    END AS overdue_level
-FROM overdue o
-JOIN members m ON o.member_id = m.id
-JOIN copies c ON o.copy_id = c.id
+    oc.days_overdue,
+    CASE 
+        WHEN oc.days_overdue > 30 THEN 'CRITICO'
+        WHEN oc.days_overdue > 7 THEN 'ALTO'
+        ELSE 'NORMAL'
+    END AS severity,
+    (oc.days_overdue * 5) AS estimated_fine_amount
+FROM overdue_calc oc
+JOIN members m ON oc.member_id = m.id
+JOIN copies c ON oc.copy_id = c.id
 JOIN books b ON c.book_id = b.id;
 
+-- VERIFY: SELECT * FROM vw_overdue_loans WHERE days_overdue > 0;
 
--- Ranking de libros más prestados
--- Se agrupan préstamos por libro, no por copia
+-- ============================================================
+-- Grain: Una fila por libro (Título/Autor).
+-- Metrics: Total de préstamos, Ranking (Dense Rank).
+-- ============================================================
 CREATE OR REPLACE VIEW vw_most_borrowed_books AS
 SELECT
-    b.id,
+    b.id AS book_id,
     b.title,
+    b.author, 
     COUNT(l.id) AS total_loans,
-    RANK() OVER (ORDER BY COUNT(l.id) DESC) AS ranking
+    DENSE_RANK() OVER (ORDER BY COUNT(l.id) DESC) AS ranking
 FROM books b
 JOIN copies c ON b.id = c.book_id
-JOIN loans l ON c.id = l.copy_id
-GROUP BY b.id, b.title;
+LEFT JOIN loans l ON c.id = l.copy_id
+GROUP BY b.id, b.title, b.author;
 
+-- VERIFY: SELECT * FROM vw_most_borrowed_books ORDER BY ranking LIMIT 5;
 
--- Vista de multas no pagadas
--- Permite identificar adeudos activos
-CREATE OR REPLACE VIEW vw_unpaid_fines AS
-SELECT
-    f.id AS fine_id,
-    m.name AS member_name,
-    b.title AS book_title,
-    COALESCE(f.amount, 0) AS amount,
-    l.due_at
-FROM fines f
-JOIN loans l ON f.loan_id = l.id
-JOIN members m ON l.member_id = m.id
-JOIN copies c ON l.copy_id = c.id
-JOIN books b ON c.book_id = b.id
-WHERE f.paid_at IS NULL;
+-- ============================================================
+-- Grain: Una fila por Mes/Año.
+-- Metrics: Total generado, recaudado y deuda pendiente.
+-- ============================================================
+CREATE OR REPLACE VIEW vw_fines_summary AS
+SELECT 
+    TO_CHAR(created_at, 'YYYY-MM') AS month_label,
+    COUNT(*) AS total_fines,
+    SUM(amount) AS total_amount_generated,
+    SUM(CASE WHEN paid_at IS NOT NULL THEN amount ELSE 0 END) AS total_collected,
+    SUM(CASE WHEN paid_at IS NULL THEN amount ELSE 0 END) AS pending_debt
+FROM fines
+GROUP BY TO_CHAR(created_at, 'YYYY-MM')
+HAVING SUM(amount) > 0;
 
+-- VERIFY: SELECT * FROM vw_fines_summary ORDER BY month_label DESC;
 
--- Actividad de préstamos por miembro
--- Incluye préstamos activos e históricos
+-- ============================================================
+-- Grain: Una fila por socio.
+-- Metrics: Préstamos totales, activos y tasa de devolución tardía.
+-- ============================================================
 CREATE OR REPLACE VIEW vw_member_activity AS
 SELECT
-    m.id,
+    m.id AS member_id,
     m.name,
+    m.email,
     COUNT(l.id) AS total_loans,
-    COUNT(CASE WHEN l.returned_at IS NULL THEN 1 END) AS active_loans
+    COUNT(CASE WHEN l.returned_at IS NULL THEN 1 END) AS active_loans,
+    ROUND(
+        (SUM(CASE WHEN l.returned_at > l.due_at THEN 1 ELSE 0 END)::numeric 
+        / NULLIF(COUNT(l.id), 0)) * 100, 
+    2) AS late_return_rate
 FROM members m
 LEFT JOIN loans l ON m.id = l.member_id
-GROUP BY m.id, m.name
+GROUP BY m.id, m.name, m.email
 HAVING COUNT(l.id) > 0;
 
--- Estado del inventario por libro
--- Permite conocer disponibilidad de copias
+-- VERIFY: SELECT * FROM vw_member_activity ORDER BY total_loans DESC;
+
+-- ============================================================
+-- Grain: Una fila por libro (incluye categoría).
+-- Metrics: Copias totales, disponibles, prestadas y perdidas.
+-- ============================================================
 CREATE OR REPLACE VIEW vw_inventory_health AS
 SELECT
     b.title,
+    b.category,
     COUNT(c.id) AS total_copies,
-    COUNT(CASE WHEN c.status = 'available' THEN 1 END) AS available_copies,
-    COUNT(CASE WHEN c.status = 'loaned' THEN 1 END) AS loaned_copies,
+    SUM(CASE WHEN c.status = 'available' THEN 1 ELSE 0 END) AS available_copies,
+    SUM(CASE WHEN c.status = 'loaned' THEN 1 ELSE 0 END) AS loaned_copies,
+    SUM(CASE WHEN c.status = 'lost' THEN 1 ELSE 0 END) AS lost_copies,
     CASE
-        WHEN COUNT(CASE WHEN c.status = 'available' THEN 1 END) = 0 THEN 'SIN STOCK'
-        WHEN COUNT(CASE WHEN c.status = 'available' THEN 1 END) < 2 THEN 'STOCK BAJO'
-        ELSE 'STOCK OK'
+        WHEN SUM(CASE WHEN c.status = 'available' THEN 1 ELSE 0 END) = 0 THEN 'SIN STOCK'
+        WHEN SUM(CASE WHEN c.status = 'available' THEN 1 ELSE 0 END) < 2 THEN 'BAJO'
+        ELSE 'OK'
     END AS inventory_status
 FROM books b
 JOIN copies c ON b.id = c.book_id
-GROUP BY b.title;
+GROUP BY b.title, b.category;
 
--- 6. Resumen por categoría
-CREATE OR REPLACE VIEW vw_category_summary AS
-...
+-- VERIFY: SELECT * FROM vw_inventory_health WHERE inventory_status != 'OK';
