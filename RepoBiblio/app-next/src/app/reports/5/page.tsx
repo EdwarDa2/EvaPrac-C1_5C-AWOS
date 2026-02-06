@@ -3,7 +3,8 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Reporte5({ searchParams }: { searchParams: { status?: string } }) {
+export default async function Reporte5(props: { searchParams: Promise<{ status?: string }> }) {
+  const searchParams = await props.searchParams;
   const statusFilter = searchParams?.status;
 
   let sql = 'SELECT * FROM vw_inventory_health';

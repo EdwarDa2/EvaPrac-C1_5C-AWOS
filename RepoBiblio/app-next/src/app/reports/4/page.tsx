@@ -3,7 +3,8 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Reporte4({ searchParams }: { searchParams: { min?: string } }) {
+export default async function Reporte4(props: { searchParams: Promise<{ min?: string }> }) {
+  const searchParams = await props.searchParams;
   const minRate = Number(searchParams?.min) || 0;
 
   const result = await query(

@@ -3,7 +3,8 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Reporte1({ searchParams }: { searchParams: { q?: string } }) {
+export default async function Reporte1(props: { searchParams: Promise<{ q?: string }> }) {
+  const searchParams = await props.searchParams;
   const busqueda = searchParams?.q || "";
 
   const sql = `
