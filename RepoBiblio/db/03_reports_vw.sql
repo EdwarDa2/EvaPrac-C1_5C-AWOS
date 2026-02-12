@@ -28,7 +28,8 @@ SELECT
 FROM overdue_calc oc
 JOIN members m ON oc.member_id = m.id
 JOIN copies c ON oc.copy_id = c.id
-JOIN books b ON c.book_id = b.id;
+JOIN books b ON c.book_id = b.id
+ORDER BY oc.days_overdue DESC;
 
 -- VERIFY: SELECT * FROM vw_overdue_loans WHERE days_overdue > 0;
 
@@ -40,21 +41,22 @@ CREATE OR REPLACE VIEW vw_most_borrowed_books AS
 SELECT
     b.id AS book_id,
     b.title,
-    b.author, 
+    b.author,
+    b.category,
     COUNT(l.id) AS total_loans,
     DENSE_RANK() OVER (ORDER BY COUNT(l.id) DESC) AS ranking
 FROM books b
-JOIN copies c ON b.id = c.book_id
+LEFT JOIN copies c ON b.id = c.book_id
 LEFT JOIN loans l ON c.id = l.copy_id
-GROUP BY b.id, b.title, b.author;
+GROUP BY b.id, b.title, b.author, b.category
+HAVING COUNT(l.id) > 0
+ORDER BY ranking ASC;
 
 -- VERIFY: SELECT * FROM vw_most_borrowed_books ORDER BY ranking LIMIT 5;
 
 -- ============================================================
 -- Grain: Una fila por Mes/Año (Basado en la fecha del préstamo).
 -- Metrics: Total generado, recaudado y deuda pendiente.
--- CORRECCIÓN: Se hace JOIN con loans para obtener la fecha, 
--- ya que 'fines' podría no tener created_at.
 -- ============================================================
 CREATE OR REPLACE VIEW vw_fines_summary AS
 SELECT 
@@ -66,29 +68,35 @@ SELECT
 FROM fines f
 JOIN loans l ON f.loan_id = l.id
 GROUP BY TO_CHAR(l.loaned_at, 'YYYY-MM')
-HAVING SUM(f.amount) > 0;
+HAVING SUM(f.amount) > 0
+ORDER BY month_label DESC;
 
 -- VERIFY: SELECT * FROM vw_fines_summary ORDER BY month_label DESC;
 
 -- ============================================================
 -- Grain: Una fila por socio.
--- Metrics: Préstamos totales, activos y tasa de devolución tardía.
+-- Metrics: Préstamos totales, devueltos, tardíos y tasa de morosidad.
 -- ============================================================
 CREATE OR REPLACE VIEW vw_member_activity AS
 SELECT
     m.id AS member_id,
-    m.name,
+    m.name AS member_name,
     m.email,
     COUNT(l.id) AS total_loans,
-    COUNT(CASE WHEN l.returned_at IS NULL THEN 1 END) AS active_loans,
-    ROUND(
-        (SUM(CASE WHEN l.returned_at > l.due_at THEN 1 ELSE 0 END)::numeric 
-        / NULLIF(COUNT(l.id), 0)) * 100, 
-    2) AS late_return_rate
+    SUM(CASE WHEN l.returned_at IS NOT NULL THEN 1 ELSE 0 END) AS returned_loans,
+    SUM(CASE WHEN l.returned_at > l.due_at THEN 1 ELSE 0 END) AS late_returns,
+    COALESCE(
+        ROUND(
+            (SUM(CASE WHEN l.returned_at > l.due_at THEN 1 ELSE 0 END)::numeric 
+            / NULLIF(COUNT(l.id), 0)) * 100, 
+        2),
+        0
+    ) AS late_return_rate
 FROM members m
 LEFT JOIN loans l ON m.id = l.member_id
 GROUP BY m.id, m.name, m.email
-HAVING COUNT(l.id) > 0;
+HAVING COUNT(l.id) > 0
+ORDER BY total_loans DESC;
 
 -- VERIFY: SELECT * FROM vw_member_activity ORDER BY total_loans DESC;
 
@@ -111,6 +119,7 @@ SELECT
     END AS inventory_status
 FROM books b
 JOIN copies c ON b.id = c.book_id
-GROUP BY b.title, b.category;
+GROUP BY b.title, b.category
+HAVING COUNT(c.id) > 0;
 
 -- VERIFY: SELECT * FROM vw_inventory_health WHERE inventory_status != 'OK';

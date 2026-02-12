@@ -1,56 +1,79 @@
-import { query } from '../../lib/bd';
 import Link from 'next/link';
+import { query } from '@/app/lib/bd';
+
+interface Prestamo {
+  loan_id: number;
+  member_name: string;
+  book_title: string;
+  days_overdue: number;
+  severity: string;
+  estimated_fine_amount: number;
+}
+
 export const dynamic = 'force-dynamic';
 
-export default async function ReporteMorosos() {
-  const result = await query('SELECT * FROM vw_overdue_loans ORDER BY days_overdue DESC');
-  const morosos = result.rows;
-  const totalDeuda = morosos.reduce((acc: number, row: any) => acc + Number(row.estimated_fine_amount), 0);
+export default async function Reporte2() {
+  try {
+    const result = await query(`
+      SELECT *
+      FROM vw_overdue_loans
+      ORDER BY days_overdue DESC
+    `);
 
-  return (
-    <div className="min-h-screen bg-gray-100 p-8 font-sans">
-      <div className="max-w-5xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-black text-gray-900">🚨 Préstamos Vencidos</h1>
-          <Link href="/" className="text-sm font-bold text-blue-700 hover:underline">Volver</Link>
+    const data: Prestamo[] = result.rows;
+
+    return (
+      <div className="p-8 max-w-6xl mx-auto">
+        <div className="mb-6 flex justify-between items-center">
+          <h1 className="text-2xl font-bold">⏰ Préstamos Vencidos</h1>
+          <Link href="/" className="text-blue-600 hover:underline">
+            ← Volver
+          </Link>
         </div>
 
-        <div className="bg-white p-4 rounded border-l-4 border-red-600 shadow-sm mb-6 flex justify-between items-center">
-          <p className="text-gray-800 font-bold">Deuda Estimada Total</p>
-          <p className="text-2xl font-black text-red-700">${totalDeuda.toFixed(2)}</p>
-        </div>
-
-        <div className="bg-white border border-gray-300 rounded overflow-hidden shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-gray-200 text-gray-800 uppercase font-bold">
-              <tr>
-                <th className="p-3">Socio</th>
-                <th className="p-3">Libro</th>
-                <th className="p-3 text-center">Días</th>
-                <th className="p-3 text-center">Nivel</th>
-                <th className="p-3 text-right">Multa</th>
+        <table className="w-full border">
+          <thead>
+            <tr>
+              <th className="p-3 text-left">Socio</th>
+              <th className="p-3 text-left">Libro</th>
+              <th className="p-3 text-center">Días Atraso</th>
+              <th className="p-3 text-center">Severidad</th>
+              <th className="p-3 text-right">Multa</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((p) => (
+              <tr key={p.loan_id} className="border-t">
+                <td className="p-3">{p.member_name}</td>
+                <td className="p-3">{p.book_title}</td>
+                <td className="p-3 text-center">{p.days_overdue}</td>
+                <td className="p-3 text-center">
+                  <span
+                    className={`px-2 py-1 rounded text-sm ${
+                      p.severity === 'CRITICO'
+                        ? 'bg-red-200 text-red-800'
+                        : p.severity === 'ALTO'
+                        ? 'bg-orange-200 text-orange-800'
+                        : 'bg-yellow-200 text-yellow-800'
+                    }`}
+                  >
+                    {p.severity}
+                  </span>
+                </td>
+                <td className="p-3 text-right">
+                  ${Number(p.estimated_fine_amount).toFixed(2)}
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {morosos.map((row: any) => (
-                <tr key={row.loan_id} className="hover:bg-red-50">
-                  <td className="p-3 font-bold text-gray-900">{row.member_name}</td>
-                  <td className="p-3 text-gray-700">{row.book_title}</td>
-                  <td className="p-3 text-center font-bold text-gray-900">{row.days_overdue}</td>
-                  <td className="p-3 text-center">
-                    <span className={`px-2 py-1 rounded text-xs font-black ${
-                      row.severity === 'CRITICO' ? 'bg-red-200 text-red-900' : 'bg-yellow-200 text-yellow-900'
-                    }`}>
-                      {row.severity}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right font-mono font-bold text-red-700">${row.estimated_fine_amount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </div>
-  );
+    );
+  } catch (error) {
+    return (
+      <div className="p-8">
+        Error: {error instanceof Error ? error.message : 'Error desconocido'}
+      </div>
+    );
+  }
 }

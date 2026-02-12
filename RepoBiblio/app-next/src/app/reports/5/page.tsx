@@ -1,81 +1,64 @@
-import { query } from '../../lib/bd';
+// app/reports/5/page.tsx
 import Link from 'next/link';
 
-export const dynamic = 'force-dynamic';
+export default async function Reporte5({ searchParams }: any) {
+  const params = await searchParams;
+  const status = params?.status ?? '';
 
-export default async function Reporte5(props: { searchParams: Promise<{ status?: string }> }) {
-  const searchParams = await props.searchParams;
-  const statusFilter = searchParams?.status;
-
-  let sql = 'SELECT * FROM vw_inventory_health';
-  const params = [];
-
-  if (statusFilter && statusFilter !== "") {
-    sql += ' WHERE inventory_status = $1';
-    params.push(statusFilter);
-  }
-  
-  sql += ' ORDER BY total_copies DESC';
-
-  const result = await query(sql, params);
-  const libros = result.rows;
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+  const url = `${baseUrl}/api/reports/inventory?${status ? `status=${status}` : ''}`;
+  const response = await fetch(url, { cache: 'no-store' });
+  const data = await response.json();
+  const inventario = data.data || [];
 
   return (
-    <div className="p-8 text-black bg-white min-h-screen">
+    <div className="p-8 bg-white min-h-screen text-black font-sans">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Inventario y Stock</h1>
-        <Link href="/" className="underline text-blue-800 font-bold">Volver</Link>
+        <h1 className="text-3xl font-bold">Inventario y Stock</h1>
+        <Link href="/" className="text-blue-700 underline font-bold">Volver</Link>
       </div>
 
-      <form className="mb-6 bg-gray-100 p-4 border rounded">
-        <div className="flex gap-3 items-center">
+      <div className="border border-black p-6 mb-6">
+        <form className="flex items-center gap-4">
           <label className="font-bold">Estado del Stock:</label>
-
-          <select 
-            name="status" 
-            defaultValue={statusFilter || ""} 
-            className="border border-black p-2 rounded min-w-[200px]"
-          >
+          <select name="status" defaultValue={status} className="border border-black p-2 bg-white w-64">
             <option value="">-- Ver Todos --</option>
-            <option value="SIN STOCK">Sin Stock (0 copias)</option>
-            <option value="BAJO">Bajo Stock (Menos de 2)</option>
-            <option value="OK">Saludable (OK)</option>
+            <option value="SIN STOCK">SIN STOCK</option>
+            <option value="BAJO">BAJO</option>
+            <option value="OK">OK</option>
           </select>
-
-          <button type="submit" className="bg-black text-white px-6 py-2 rounded font-bold">
+          <button type="submit" className="bg-black text-white px-6 py-2 font-bold">
             Aplicar Filtro
           </button>
-        </div>
-      </form>
+        </form>
+      </div>
 
-      <table className="w-full text-left border-collapse border border-black">
+      <table className="w-full border-collapse">
         <thead>
-          <tr className="bg-black text-white">
-            <th className="p-3">Libro</th>
-            <th className="p-3">Categoría</th>
+          <tr className="bg-black text-white text-sm uppercase">
+            <th className="p-3 text-left">Libro</th>
+            <th className="p-3 text-left">Categoría</th>
             <th className="p-3 text-center">Total Copias</th>
-            <th className="p-3 text-center">Estado</th>
+            <th className="p-3 text-right">Estado</th>
           </tr>
         </thead>
         <tbody>
-          {libros.length === 0 ? (
-            <tr><td colSpan={4} className="p-6 text-center text-xl font-bold text-red-600">No hay libros con este estado.</td></tr>
-          ) : (
-            libros.map((row: any, i: number) => (
-              <tr key={i} className="border-b border-gray-300 hover:bg-gray-50">
-                <td className="p-3 font-bold">{row.title}</td>
-                <td className="p-3">{row.category}</td>
-                <td className="p-3 text-center font-bold">{row.total_copies}</td>
-                <td className="p-3 text-center">
-                  <span className={`px-2 py-1 text-sm font-bold border border-black rounded
-                    ${row.inventory_status === 'SIN STOCK' ? 'bg-red-200 text-red-900' : 
-                      row.inventory_status === 'BAJO' ? 'bg-yellow-200 text-yellow-900' : 'bg-green-200 text-green-900'}`}>
-                    {row.inventory_status}
-                  </span>
-                </td>
-              </tr>
-            ))
-          )}
+          {inventario.map((item: any, i: number) => (
+            <tr key={i} className="border-b border-gray-200">
+              <td className="p-4 font-bold">{item.title}</td>
+              <td className="p-4 text-gray-600">{item.category}</td>
+              <td className="p-4 text-center font-bold">{item.total_copies}</td>
+              <td className="p-4 text-right">
+                <span className={`px-3 py-1 rounded text-xs font-bold border ${
+                  item.inventory_status === 'BAJO' ? 'bg-yellow-200 border-yellow-600 text-yellow-800' :
+                  item.inventory_status === 'SIN STOCK' ? 'bg-red-200 border-red-600 text-red-800' :
+                  'bg-green-200 border-green-600 text-green-800'
+                }`}>
+                  {item.inventory_status}
+                </span>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
